@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
-import { savePensionProfile } from "./actions";
+import { saveScenario, createScenario, deleteScenario } from "./actions";
 
 const TIERS = {
   tier4: {
@@ -51,38 +51,85 @@ function currency(n) {
   }).format(n);
 }
 
-export default function PensionCalculator({ initial }) {
-  const [tierKey, setTierKey] = useState(initial?.tierKey ?? "tier4");
-  const [currentAge, setCurrentAge] = useState(initial?.currentAge ?? 38);
-  const [yos, setYos] = useState(initial?.yos ?? 12);
-  const [fas, setFas] = useState(initial?.fas ?? 78000);
-  const [investBalance, setInvestBalance] = useState(initial?.investBalance ?? 65000);
-  const [deferredComp, setDeferredComp] = useState(initial?.deferredComp ?? 40000);
-  const [monthlyContrib, setMonthlyContrib] = useState(initial?.monthlyContrib ?? 600);
-  const [desiredMonthlyIncome, setDesiredMonthlyIncome] = useState(initial?.desiredMonthlyIncome ?? 6500);
-  const [growthRate, setGrowthRate] = useState(initial?.growthRate ?? 6);
+function summarize(s) {
+  const t = TIERS[s.tierKey] ?? TIERS.tier4;
+  const yearsToNormal = Math.max(t.normalAge - s.currentAge, 0);
+  const yearsWorked = s.yos + yearsToNormal;
+  const base = estimateAnnualPension(s.fas, yearsWorked, s.tierKey);
+  const adjusted = applyEarlyReduction(base, t.normalAge, s.tierKey);
+  const pensionMonthly = Math.round(adjusted / 12);
+  return {
+    retireAge: t.normalAge,
+    pensionMonthly,
+    gapMonthly: Math.max(s.desiredMonthlyIncome - pensionMonthly, 0),
+  };
+}
 
-  const [saveStatus, setSaveStatus] = useState(initial ? "saved" : "idle");
+export default function PensionCalculator({ savedScenarios }) {
+  const [list, setList] = useState(savedScenarios);
+  const [activeId, setActiveId] = useState(savedScenarios[0]?.id ?? null);
+  const active = list.find((s) => s.id === activeId) ?? list[0];
+
+  const [name, setName] = useState(active?.name ?? "My plan");
+  const [tierKey, setTierKey] = useState(active?.tierKey ?? "tier4");
+  const [currentAge, setCurrentAge] = useState(active?.currentAge ?? 38);
+  const [yos, setYos] = useState(active?.yos ?? 12);
+  const [fas, setFas] = useState(active?.fas ?? 78000);
+  const [investBalance, setInvestBalance] = useState(active?.investBalance ?? 65000);
+  const [deferredComp, setDeferredComp] = useState(active?.deferredComp ?? 40000);
+  const [monthlyContrib, setMonthlyContrib] = useState(active?.monthlyContrib ?? 600);
+  const [desiredMonthlyIncome, setDesiredMonthlyIncome] = useState(active?.desiredMonthlyIncome ?? 6500);
+  const [growthRate, setGrowthRate] = useState(active?.growthRate ?? 6);
+
+  const [saveStatus, setSaveStatus] = useState("saved");
   const [saveError, setSaveError] = useState("");
-  const firstRender = React.useRef(true);
+  const [pending, setPending] = useState(false);
+  const skipDirty = React.useRef(true);
 
   useEffect(() => {
-    if (firstRender.current) {
-      firstRender.current = false;
+    if (skipDirty.current) {
+      skipDirty.current = false;
       return;
     }
     setSaveStatus("dirty");
     setSaveError("");
-  }, [tierKey, currentAge, yos, fas, investBalance, deferredComp, monthlyContrib, desiredMonthlyIncome, growthRate]);
+  }, [name, tierKey, currentAge, yos, fas, investBalance, deferredComp, monthlyContrib, desiredMonthlyIncome, growthRate]);
+
+  const liveValues = {
+    tierKey, currentAge, yos, fas, investBalance,
+    deferredComp, monthlyContrib, desiredMonthlyIncome, growthRate,
+  };
+
+  function hydrate(s) {
+    skipDirty.current = true;
+    setActiveId(s.id);
+    setName(s.name);
+    setTierKey(s.tierKey);
+    setCurrentAge(s.currentAge);
+    setYos(s.yos);
+    setFas(s.fas);
+    setInvestBalance(s.investBalance);
+    setDeferredComp(s.deferredComp);
+    setMonthlyContrib(s.monthlyContrib);
+    setDesiredMonthlyIncome(s.desiredMonthlyIncome);
+    setGrowthRate(s.growthRate);
+    setSaveStatus("saved");
+    setSaveError("");
+  }
+
+  function switchTo(s) {
+    if (s.id === activeId) return;
+    if (saveStatus === "dirty" && !window.confirm("Discard unsaved changes to this scenario?")) return;
+    hydrate(s);
+  }
 
   async function handleSave() {
+    if (!active) return;
     setSaveStatus("saving");
     setSaveError("");
-    const res = await savePensionProfile({
-      tierKey, currentAge, yos, fas, investBalance,
-      deferredComp, monthlyContrib, desiredMonthlyIncome, growthRate,
-    });
+    const res = await saveScenario(active.id, name, liveValues);
     if (res.ok) {
+      setList((prev) => prev.map((s) => (s.id === active.id ? { ...s, ...liveValues, name } : s)));
       setSaveStatus("saved");
     } else {
       setSaveStatus("error");
@@ -90,8 +137,42 @@ export default function PensionCalculator({ initial }) {
     }
   }
 
+  async function handleNew() {
+    setPending(true);
+    setSaveError("");
+    const proposed = `Plan ${list.length + 1}`;
+    const res = await createScenario(proposed, liveValues);
+    setPending(false);
+    if (res.ok) {
+      const created = { id: res.id, name: proposed, ...liveValues };
+      setList((prev) => [...prev, created]);
+      hydrate(created);
+    } else {
+      setSaveError(res.error || "Could not create");
+    }
+  }
+
+  async function handleDelete() {
+    if (!active || list.length <= 1) return;
+    if (!window.confirm(`Delete "${active.name}"? This cannot be undone.`)) return;
+    setPending(true);
+    setSaveError("");
+    const res = await deleteScenario(active.id);
+    setPending(false);
+    if (res.ok) {
+      const remaining = list.filter((s) => s.id !== active.id);
+      setList(remaining);
+      hydrate(remaining[0]);
+    } else {
+      setSaveError(res.error || "Could not delete");
+    }
+  }
+
+  const compareRows = list
+    .map((s) => (s.id === activeId ? { ...s, ...liveValues, name } : s))
+    .map((s) => ({ id: s.id, name: s.name, ...summarize(s) }));
+
   const saveLabel = {
-    idle: "Save",
     dirty: "Save changes",
     saving: "Saving…",
     saved: "Saved ✓",
@@ -183,6 +264,94 @@ export default function PensionCalculator({ initial }) {
             </div>
             <div style={{ width: 42, height: 42, borderRadius: "50%", border: `2px solid ${brass}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Lora', Georgia, serif", fontSize: 13, color: brass, flexShrink: 0 }}>
               {tierKey === "tier4" ? "T4" : "T6"}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: "#fff", border: `1px solid ${ledgerLine}`, borderRadius: 10, padding: 20, marginBottom: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+            <div style={{ fontSize: 12.5, textTransform: "uppercase", letterSpacing: 0.5, color: "#6b7280" }}>
+              Scenarios ({list.length}/8)
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                onClick={handleNew}
+                disabled={pending || list.length >= 8}
+                style={{ padding: "7px 13px", fontSize: 13, fontFamily: "inherit", borderRadius: 6, border: `1px solid ${ledgerLine}`, background: "#fff", color: inkNavy, cursor: pending || list.length >= 8 ? "default" : "pointer", opacity: pending || list.length >= 8 ? 0.45 : 1 }}
+              >
+                + Duplicate as new
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={pending || list.length <= 1}
+                style={{ padding: "7px 13px", fontSize: 13, fontFamily: "inherit", borderRadius: 6, border: `1px solid ${ledgerLine}`, background: "#fff", color: list.length <= 1 ? "#9ca3af" : "#8c3b3b", cursor: pending || list.length <= 1 ? "default" : "pointer", opacity: pending || list.length <= 1 ? 0.45 : 1 }}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+            {list.map((s) => {
+              const isActive = s.id === activeId;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => switchTo(s)}
+                  style={{
+                    padding: "7px 14px",
+                    fontSize: 13,
+                    fontFamily: "inherit",
+                    borderRadius: 999,
+                    cursor: isActive ? "default" : "pointer",
+                    border: `1px solid ${isActive ? inkNavy : ledgerLine}`,
+                    background: isActive ? inkNavy : "#fff",
+                    color: isActive ? paper : inkNavy,
+                  }}
+                >
+                  {isActive ? name || "Untitled" : s.name}
+                  {isActive && saveStatus === "dirty" ? " •" : ""}
+                </button>
+              );
+            })}
+          </div>
+
+          <label style={labelStyle}>Scenario name</label>
+          <input
+            value={name}
+            maxLength={40}
+            onChange={(e) => setName(e.target.value)}
+            style={inputStyle}
+          />
+
+          <div style={{ marginTop: 18, borderTop: `1px solid ${ledgerLine}`, paddingTop: 14 }}>
+            <div style={{ fontSize: 12.5, textTransform: "uppercase", letterSpacing: 0.5, color: "#6b7280", marginBottom: 8 }}>Side by side</div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13.5, minWidth: 420 }}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Scenario</th>
+                    <th style={thStyle}>Retire at</th>
+                    <th style={thStyle}>Pension / mo</th>
+                    <th style={thStyle}>Gap / mo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {compareRows.map((r) => (
+                    <tr key={r.id} style={{ borderTop: `1px solid ${ledgerLine}`, background: r.id === activeId ? "rgba(166,124,61,0.07)" : "transparent" }}>
+                      <td style={tdStyle}>{r.name || "Untitled"}</td>
+                      <td style={tdStyle}>{r.retireAge}</td>
+                      <td style={{ ...tdStyle, fontVariantNumeric: "tabular-nums" }}>{currency(r.pensionMonthly)}</td>
+                      <td style={{ ...tdStyle, fontVariantNumeric: "tabular-nums", color: r.gapMonthly > 0 ? "#8c3b3b" : green }}>
+                        {r.gapMonthly > 0 ? currency(r.gapMonthly) : "covered"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
