@@ -268,6 +268,10 @@ export default function PensionCalculator({ savedScenarios }) {
           </div>
         </div>
 
+        <div style={{ background: "rgba(166,124,61,0.15)", border: `1px solid ${brass}`, color: inkNavy, borderRadius: 8, padding: "12px 16px", marginBottom: 24, fontSize: 13, lineHeight: 1.5 }}>
+          <strong>Disclaimer:</strong> This tool is for estimation purposes only. It uses simplified formulas and does not constitute official financial advice. Always verify your exact pension figures, tier rules, and eligibility directly with NYCERS or your plan administrator before making retirement decisions.
+        </div>
+
         <div style={{ background: "#fff", border: `1px solid ${ledgerLine}`, borderRadius: 10, padding: 20, marginBottom: 20 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
             <div style={{ fontSize: 12.5, textTransform: "uppercase", letterSpacing: 0.5, color: "#6b7280" }}>
