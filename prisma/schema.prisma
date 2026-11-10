@@ -17,6 +17,10 @@ model User {
   accounts      Account[]
   sessions      Session[]
   pensionProfiles PensionProfile[]
+  mileageTrips  MileageTrip[]
+  gigExpenses   GigExpense[]
+  gigIncomes    GigIncome[]
+  gigSettings   GigSettings?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -79,4 +83,54 @@ model PensionProfile {
 
   @@unique([userId, name])
   @@index([userId])
+}
+
+model MileageTrip {
+  id        String   @id @default(cuid())
+  userId    String
+  date      DateTime @db.Date
+  miles     Float
+  purpose   String   @default("Amazon Hub delivery")
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+}
+
+model GigExpense {
+  id          String   @id @default(cuid())
+  userId      String
+  date        DateTime @db.Date
+  category    String
+  description String   @default("")
+  amountCents Int
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+}
+
+model GigIncome {
+  id          String   @id @default(cuid())
+  userId      String
+  date        DateTime @db.Date
+  source      String   @default("Amazon Hub")
+  amountCents Int
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date])
+}
+
+model GigSettings {
+  userId           String @id
+  filingStatus     String @default("single")
+  otherIncomeCents Int    @default(0)
+  stateRate        Float  @default(0)
+  withheldCents    Int    @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

@@ -20,6 +20,12 @@ export default async function Home() {
           >
             Open dashboard
           </Link>
+          <Link
+            href="/gig"
+            style={{ display: "inline-block", padding: "10px 18px", border: "1px solid #16213D", color: "#16213D", borderRadius: 6, textDecoration: "none", marginRight: 12 }}
+          >
+            1099 tracker
+          </Link>
           <form
             action={async () => {
               "use server"
